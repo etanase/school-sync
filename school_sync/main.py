@@ -1,20 +1,23 @@
 """School assignment sync: Gradescope + Brightspace -> Notion.
 
 Usage:
-    python -m school_sync.main --once          # one-shot sync
-    python -m school_sync.main --watch         # poll on interval
-    python -m school_sync.main --once --source gradescope   # single source
-    python -m school_sync.main --once --source brightspace  # single source
-    python -m school_sync.main --once --dry-run             # preview changes
+    school-sync --once                       # one-shot sync
+    school-sync --watch                      # poll on interval
+    school-sync --once --source gradescope   # single source
+    school-sync --once --dry-run             # preview changes
+    school-sync login                        # authenticate with Gradescope
 """
 
 from __future__ import annotations
 
 import argparse
+import getpass
+import json
 import logging
 import signal
 import sys
 import time
+from pathlib import Path
 
 from .config import Config
 from .models import Change, ChangeType
@@ -91,16 +94,58 @@ def sync_once(cfg: Config, db: StateDB, source_filter: str | None = None, dry_ru
     return changes
 
 
+def cmd_login() -> None:
+    """Authenticate with Gradescope and save session."""
+    from gradescopeapi.classes.connection import GSConnection
+
+    cred_file = Path.home() / ".gradescope_session"
+
+    email = input("Gradescope email: ")
+    password = getpass.getpass("Gradescope password: ")
+
+    conn = GSConnection()
+    conn.login(email, password)
+    if not conn.logged_in:
+        print("Login failed.")
+        sys.exit(1)
+
+    cred_file.write_text(json.dumps({"email": email, "password": password}))
+    cred_file.chmod(0o600)
+    print(f"Authenticated as {email}. Credentials saved to {cred_file}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="School assignment sync")
-    mode = parser.add_mutually_exclusive_group(required=True)
+    sub = parser.add_subparsers(dest="command")
+
+    sub.add_parser("login", help="Authenticate with Gradescope")
+
+    sync_parser = sub.add_parser("sync", help="Run sync (default)")
+    mode = sync_parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--once", action="store_true", help="Run one sync cycle")
     mode.add_argument("--watch", action="store_true", help="Poll on interval")
-    parser.add_argument("--source", choices=["gradescope", "brightspace"],
-                        help="Sync only one source")
-    parser.add_argument("--dry-run", action="store_true", help="Preview changes without applying")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Debug logging")
+    sync_parser.add_argument("--source", choices=["gradescope", "brightspace"],
+                             help="Sync only one source")
+    sync_parser.add_argument("--dry-run", action="store_true", help="Preview changes without applying")
+    sync_parser.add_argument("--verbose", "-v", action="store_true", help="Debug logging")
+
+    # Support legacy --once/--watch at top level
+    parser.add_argument("--once", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--watch", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--source", choices=["gradescope", "brightspace"], help=argparse.SUPPRESS)
+    parser.add_argument("--dry-run", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--verbose", "-v", action="store_true", help=argparse.SUPPRESS)
+
     args = parser.parse_args()
+
+    if args.command == "login":
+        cmd_login()
+        return
+
+    # Treat no subcommand + --once/--watch as sync
+    if not args.command and not (args.once or args.watch):
+        parser.print_help()
+        sys.exit(1)
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -116,7 +161,7 @@ def main() -> None:
     db = StateDB(cfg.db_path)
 
     if args.once:
-        changes = sync_once(cfg, db, source_filter=args.source, dry_run=args.dry_run)
+        sync_once(cfg, db, source_filter=args.source, dry_run=args.dry_run)
         db.close()
         sys.exit(0)
 

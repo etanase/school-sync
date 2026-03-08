@@ -25,7 +25,7 @@ Brightspace ──(gws calendar)──┘                                  OpenC
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) (package manager)
 - [gws](https://github.com/nicholasgasior/gws) authenticated (`gws auth login`)
-- Gradescope account authenticated (`gradescope-cli login` — credentials stored in `~/.gradescope_session`)
+- A Gradescope account
 - A Notion integration with access to your target database
 - OpenClaw with webhooks enabled (optional, for notifications)
 
@@ -38,6 +38,12 @@ uv sync
 ```
 
 ### Configure
+
+Authenticate with Gradescope:
+
+```bash
+uv run school-sync login
+```
 
 Copy the example environment file into the package directory and fill in your values:
 
@@ -77,6 +83,9 @@ Only Name, Due, Course, External ID, Source, and Link are written by the sync. T
 ## Usage
 
 ```bash
+# Authenticate with Gradescope (one-time)
+uv run school-sync login
+
 # One-shot sync
 uv run school-sync --once
 
