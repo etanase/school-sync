@@ -58,8 +58,10 @@ def sync_once(cfg: Config, db: StateDB, source_filter: str | None = None, dry_ru
 
     log.info("Fetched %d total assignments", len(all_assignments))
 
-    # 2. Diff against stored state
-    changes = db.diff(all_assignments)
+    # 2. Diff against stored state (scope REMOVED detection to fetched sources only)
+    _source_names = {"gradescope": "Gradescope", "brightspace": "Brightspace"}
+    only_sources = {_source_names[source_filter]} if source_filter else None
+    changes = db.diff(all_assignments, only_sources=only_sources)
     if not changes:
         log.info("No changes detected")
         return []

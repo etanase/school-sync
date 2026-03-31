@@ -48,7 +48,7 @@ def _get_service():
         _TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
         _TOKEN_FILE.write_text(creds.to_json())
 
-    return build("drive", "v3", credentials=creds)
+    return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 
 def auth() -> None:

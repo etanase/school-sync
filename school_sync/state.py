@@ -56,8 +56,13 @@ class StateDB:
 
     # -- diff --
 
-    def diff(self, current: Sequence[Assignment]) -> list[Change]:
-        """Compare current assignments against stored state, return changes."""
+    def diff(self, current: Sequence[Assignment], *, only_sources: set[str] | None = None) -> list[Change]:
+        """Compare current assignments against stored state, return changes.
+
+        only_sources: if provided, REMOVED detection is limited to those source
+        names. Use when syncing a single source so other sources' rows are not
+        incorrectly flagged as removed.
+        """
         stored = self.get_all()
         current_map = {a.key(): a for a in current}
         changes: list[Change] = []
@@ -85,6 +90,9 @@ class StateDB:
 
         for eid, old in stored.items():
             if eid not in current_map:
+                # Skip removals for sources not included in this sync run
+                if only_sources and old["source"] not in only_sources:
+                    continue
                 old_due = datetime.fromisoformat(old["due"]) if old["due"] else None
                 # Don't remove assignments that are past due
                 if _is_past_due(old_due):
