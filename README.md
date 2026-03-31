@@ -9,10 +9,10 @@ Designed to run unattended on a schedule. When assignments are added, removed, o
 ```
 Gradescope ──(gradescopeapi)──┐
                               ├──▶ Normalize ──▶ SQLite diff ──▶ Notion upsert
-Brightspace ──(gws calendar)──┘                                  OpenClaw notify
+Brightspace ──(ICS feed)──────┘                                  OpenClaw notify
 ```
 
-1. **Poll** — Fetches assignments from Gradescope (via the [gradescopeapi](https://github.com/nyuoss/gradescope-api) library) and Brightspace (via Google Calendar events imported through `gws`).
+1. **Poll** — Fetches assignments from Gradescope (via [gradescopeapi](https://github.com/nyuoss/gradescope-api)) and Brightspace (via direct ICS calendar feed).
 2. **Normalize** — Both sources are mapped into a common `Assignment` model with a stable external ID for deduplication.
 3. **Diff** — Compares current assignments against SQLite state to detect four change types: `new`, `due_changed`, `title_changed`, `removed`.
 4. **Upsert** — Applies changes to a Notion database using idempotent queries on the `External ID` property. User-managed fields (Status, Estimate, Notes, Docs) are never overwritten.
@@ -24,7 +24,6 @@ Brightspace ──(gws calendar)──┘                                  OpenC
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) (package manager)
-- [gws](https://github.com/googleworkspace/cli) authenticated (`gws auth login`)
 - A Gradescope account
 - A Notion integration with access to your target database
 - OpenClaw with webhooks enabled (optional, for notifications)
@@ -39,27 +38,62 @@ uv sync
 
 ### Configure
 
-Authenticate with Gradescope:
+**1. Authenticate with Gradescope** (one-time):
 
 ```bash
 uv run school-sync login
 ```
 
-Copy the example environment file into the package directory and fill in your values:
+**2. Get your Brightspace ICS feed URL:**
+
+In Brightspace, go to **Calendar → Subscribe** (or the calendar settings gear). Copy the ICS/webcal feed URL. It looks like:
+```
+https://<your-institution>.brightspace.com/d2l/le/calendar/feed/user/feed.ics?token=...
+```
+
+**3. Set up Google Drive** (required for Gradescope PDF uploads):
+
+- Go to [Google Cloud Console](https://console.cloud.google.com)
+- Enable the **Google Drive API**
+- Create an **OAuth 2.0 Client ID** (Desktop app type) under **APIs & Services → Credentials**
+- Download the JSON and place it at `~/.school-sync/credentials.json`
+- Run the one-time auth flow:
 
 ```bash
-cp .env.example school_sync/.env
+uv run school-sync auth-drive
 ```
+
+This opens a browser for Google consent and saves a token to `~/.school-sync/drive_token.json`. All subsequent runs refresh silently.
+
+**4. Create the `.env` file:**
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your values. The file is loaded automatically from the project root when running `school-sync`.
 
 Required variables:
 
 | Variable | Description |
 |---|---|
-| `NOTION_API_KEY_FILE` | Path to file containing your Notion API key |
+| `NOTION_API_KEY` | Your Notion integration API key |
 | `NOTION_DATABASE_ID` | UUID of your Notion database |
-| `BRIGHTSPACE_CALENDAR_ID` | Google Calendar ID for your Brightspace calendar import |
+| `BRIGHTSPACE_ICS_URL` | ICS feed URL from Brightspace Calendar → Subscribe |
 | `COURSES_JSON` | JSON array of course mappings (see `.env.example`) |
-| `OPENCLAW_TELEGRAM_TO` | Your Telegram user ID (for notifications) |
+
+### Course mappings
+
+`COURSES_JSON` maps Brightspace organizational unit IDs to course labels. To find your OUs, look at the URL when viewing a course calendar in Brightspace (`/d2l/le/calendar/<ou>/...`):
+
+```json
+[
+  {"course_label": "CS 101", "brightspace_ou": "123456", "gradescope_id": null},
+  {"course_label": "MATH 201", "brightspace_ou": "789012", "gradescope_id": "345678"}
+]
+```
+
+Set `gradescope_id` to the numeric course ID from Gradescope if you want that source synced, or `null` to skip it.
 
 ### Notion database schema
 
@@ -69,22 +103,26 @@ Your Notion database needs these properties:
 |---|---|---|
 | Name | title | Assignment title |
 | Due | date | Due date (ISO 8601 with timezone) |
-| Course | multi_select | Course label (e.g. "ECE 50863") |
+| Course | multi_select | Course label (e.g. "CS 101") |
 | External ID | rich_text | Stable dedup key (`bs:<ou>:<id>` or `gs:<course>:<id>`) |
 | Source | select | "Brightspace" or "Gradescope" |
-| Status | select | User-managed (Backlog / Todo / Doing / Done) |
+| Area | select | Always set to "School" |
+| Status | status | User-managed (Not Started / In Progress / Done) |
 | Link | url | Link back to source |
+| Docs | files | PDF attachment (Gradescope assignments) |
 | Estimate (hrs) | number | User-managed time estimate |
-| Docs | files | User-managed attachments |
 | Notes | rich_text | User-managed notes |
 
-Only Name, Due, Course, External ID, Source, and Link are written by the sync. The rest are left untouched.
+Only Name, Due, Course, External ID, Source, Area, Link, and Docs are written by the sync. Status, Estimate, and Notes are left untouched.
 
 ## Usage
 
 ```bash
 # Authenticate with Gradescope (one-time)
 uv run school-sync login
+
+# Authenticate with Google Drive (one-time)
+uv run school-sync auth-drive
 
 # One-shot sync
 uv run school-sync --once
@@ -143,24 +181,25 @@ systemctl enable --now school-sync.timer
 ```
 school-sync/
 ├── pyproject.toml              # uv/hatch project config
+├── .env.example                # Config template
 ├── school_sync/
-│   ├── main.py                 # CLI entry point (--once / --watch)
+│   ├── main.py                 # CLI entry point (--once / --watch / login / auth-drive)
 │   ├── config.py               # Env-based config with .env loader
 │   ├── models.py               # Assignment and Change dataclasses
 │   ├── state.py                # SQLite state layer and diff engine
+│   ├── drive.py                # Google Drive PDF upload (OAuth2)
 │   ├── sources/
 │   │   ├── gradescope.py       # gradescopeapi library adapter
-│   │   └── brightspace.py      # gws calendar adapter
+│   │   └── brightspace.py      # ICS feed adapter (stdlib urllib + parser)
 │   └── targets/
 │       ├── notion.py           # Notion API upsert (stdlib urllib)
 │       └── openclaw.py         # OpenClaw /hooks/agent webhook
-└── .env.example
 ```
 
 ## Change detection
 
 Each assignment gets a stable external ID:
-- Brightspace: `bs:<organizational_unit>:<calendar_event_id>` (extracted from event description URLs)
+- Brightspace: `bs:<organizational_unit>:<calendar_event_id>` (extracted from description URLs in the ICS feed)
 - Gradescope: `gs:<course_id>:<assignment_id>`
 
 On each sync, the current assignment set is compared against SQLite state. Four change types are detected:
@@ -172,7 +211,7 @@ On each sync, the current assignment set is compared against SQLite state. Four 
 | `title_changed` | Title string differs | Update page |
 | `removed` | External ID in state but not in current set | Archive page |
 
-All state updates are committed atomically after Notion changes succeed.
+Past-due assignments are excluded from edits and removals. All state updates are committed atomically after Notion changes succeed.
 
 ## OpenClaw integration
 
@@ -183,11 +222,3 @@ When changes are detected, a single `POST /hooks/agent` request is sent to the O
 - Run timestamp
 
 OpenClaw runs an isolated agent turn that summarizes the changes and delivers the message to Telegram. The gateway URL and token are read from `~/.openclaw/openclaw.json` automatically.
-
-## Future work
-
-Hooks are left in `targets/notion.py` for:
-- Downloading assignment PDFs from source
-- Uploading to Google Drive
-- Estimating time per assignment
-- Auto-creating Google Docs from templates

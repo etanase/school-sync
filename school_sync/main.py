@@ -129,6 +129,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("login", help="Authenticate with Gradescope")
+    sub.add_parser("auth-drive", help="Authenticate with Google Drive (one-time OAuth2 flow)")
 
     sync_parser = sub.add_parser("sync", help="Run sync (default)")
     mode = sync_parser.add_mutually_exclusive_group(required=True)
@@ -150,6 +151,12 @@ def main() -> None:
 
     if args.command == "login":
         cmd_login()
+        return
+
+    if args.command == "auth-drive":
+        logging.basicConfig(level=logging.INFO, format="%(message)s")
+        drive.auth()
+        print("Drive authentication complete.")
         return
 
     # Treat no subcommand + --once/--watch as sync

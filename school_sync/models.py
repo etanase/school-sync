@@ -20,10 +20,10 @@ class ChangeType(Enum):
 
 @dataclass
 class Assignment:
-    external_id: str        # stable key, e.g. "bs:1489291:12345" or "gs:1222491:67890"
+    external_id: str        # stable key, e.g. "bs:123456:12345" or "gs:654321:67890"
     title: str
     due: datetime | None
-    course: str             # e.g. "ECE 50863"
+    course: str             # e.g. "CS 101"
     source: str             # "Brightspace" or "Gradescope"
     link: str | None = None
     source_status: str | None = None  # raw status from source

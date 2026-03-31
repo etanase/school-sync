@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import logging
+import ssl
 import time
 from datetime import datetime
 from typing import Any
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 import json as _json
+
+import certifi
+
+_SSL_CTX = ssl.create_default_context(cafile=certifi.where())
 
 from ..config import Config
 from ..models import Assignment, Change, ChangeType
@@ -34,7 +39,7 @@ def _request(method: str, url: str, api_key: str, body: dict | None = None) -> d
     for attempt in range(1, _MAX_RETRIES + 1):
         req = Request(url, data=data, headers=_headers(api_key), method=method)
         try:
-            with urlopen(req, timeout=30) as resp:
+            with urlopen(req, context=_SSL_CTX, timeout=30) as resp:
                 return _json.loads(resp.read())
         except HTTPError as e:
             resp_body = e.read().decode() if e.fp else ""

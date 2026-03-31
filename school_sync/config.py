@@ -9,16 +9,20 @@ from pathlib import Path
 
 
 def _load_dotenv() -> None:
-    """Load .env file from the package directory (no dependencies)."""
-    env_path = Path(__file__).parent / ".env"
-    if not env_path.is_file():
-        return
-    for line in env_path.read_text().splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
+    """Load .env file, checking the package dir then the project root."""
+    for env_path in (
+        Path(__file__).parent / ".env",         # school_sync/.env
+        Path(__file__).parent.parent / ".env",  # project root .env
+    ):
+        if not env_path.is_file():
             continue
-        key, _, value = line.partition("=")
-        os.environ.setdefault(key.strip(), value.strip())
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
+        break
 
 
 def _read_file_or_env(env_key: str, file_path: str | None = None) -> str:
@@ -33,8 +37,8 @@ def _read_file_or_env(env_key: str, file_path: str | None = None) -> str:
 
 @dataclass
 class CourseMapping:
-    course_label: str           # e.g. "ECE 50863"
-    brightspace_ou: str | None  # e.g. "1489291"
+    course_label: str           # e.g. "CS 101"
+    brightspace_ou: str | None  # e.g. "123456"
     gradescope_id: str | None   # e.g. "1222491"
 
 
@@ -44,8 +48,8 @@ class Config:
     notion_api_key: str = ""
     notion_database_id: str = ""
 
-    # Brightspace via gws calendar
-    brightspace_calendar_id: str = ""
+    # Brightspace ICS calendar feed URL
+    brightspace_ics_url: str = ""
     sync_days_ahead: int = 180
 
     # Course mappings
@@ -84,8 +88,8 @@ class Config:
             notion_database_id=os.environ.get(
                 "NOTION_DATABASE_ID", cls.notion_database_id
             ),
-            brightspace_calendar_id=os.environ.get(
-                "BRIGHTSPACE_CALENDAR_ID", cls.brightspace_calendar_id
+            brightspace_ics_url=os.environ.get(
+                "BRIGHTSPACE_ICS_URL", cls.brightspace_ics_url
             ),
             sync_days_ahead=int(os.environ.get("SYNC_DAYS_AHEAD", "180")),
             courses=courses,
