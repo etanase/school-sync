@@ -59,12 +59,8 @@ def _download_pdf(session, course_id: str, assignment_id: str) -> Path | None:
 
 
 def _convert(gs_assignment, course: CourseMapping) -> Assignment | None:
-    """Convert a gradescopeapi Assignment to our model, filtering out completed work."""
+    """Convert a gradescopeapi Assignment to our model"""
     status = gs_assignment.submissions_status or ""
-    if status and status.lower() not in ("no submission", ""):
-        return None
-    if gs_assignment.grade:
-        return None
 
     aid = gs_assignment.assignment_id
     return Assignment(
@@ -92,7 +88,7 @@ def fetch_all(cfg: Config) -> list[Assignment]:
                 conn = _get_connection()
             gs_assignments = conn.account.get_assignments(course.gradescope_id)
             parsed = [a for gs in gs_assignments if (a := _convert(gs, course))]
-            log.info("  -> %d actionable assignments", len(parsed))
+            log.info("  -> %d assignments", len(parsed))
             for a in parsed:
                 aid = a.external_id.rsplit(":", 1)[-1]
                 if aid and aid != "none":
